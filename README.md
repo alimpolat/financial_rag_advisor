@@ -243,16 +243,4 @@ Potential improvements to consider:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## For A.Team
-
-This project showcases domain-specific RAG implementation for financial analysis, demonstrating expertise in:
-
-- LangChain and modern AI architecture design
-- OpenAI API integration for embeddings and generation
-- Financial domain knowledge and specialized text processing
-- Production-ready architecture with robust error handling
-- User-centric design with intuitive interface and comprehensive analytics
-
-The system highlights how domain-specific optimizations can significantly enhance RAG applications for specialized fields like finance. 
+This project is licensed under the MIT License - see the LICENSE file for details. 
