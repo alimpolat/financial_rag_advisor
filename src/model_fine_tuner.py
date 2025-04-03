@@ -15,7 +15,7 @@ from typing import List, Dict, Any, Optional
 import pandas as pd
 import jsonlines
 import tqdm
-from openai import OpenAI
+import openai
 from dotenv import load_dotenv
 from src.financial_analyzer import FinancialAnalyzer
 
@@ -49,170 +49,137 @@ class ModelFineTuner:
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        # Initialize OpenAI client
+        # Initialize OpenAI API
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
-        self.client = OpenAI(api_key=api_key)
+        
+        # Set API key directly instead of using client
+        openai.api_key = api_key
         
     def generate_training_data(self, 
                               financial_texts: List[str], 
-                              financial_metrics: Optional[List[Dict[str, Any]]] = None) -> str:
+                              output_file: str = None) -> str:
         """
-        Generate training data from financial texts and extracted metrics.
+        Generate training data from financial texts.
         
         Args:
-            financial_texts: List of financial document texts
-            financial_metrics: Optional pre-extracted financial metrics
+            financial_texts: List of financial texts
+            output_file: Path to output file (default: ./fine_tuning/financial_training_data.jsonl)
             
         Returns:
-            Path to the generated JSONL training file
+            Path to the generated training data file
         """
+        if output_file is None:
+            output_file = os.path.join(self.output_dir, "financial_training_data.jsonl")
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        
+        # Extract metrics and generate question-answer pairs
         training_data = []
         
-        # If metrics not provided, extract them
-        if not financial_metrics:
-            financial_metrics = []
-            for text in financial_texts:
-                metrics = self.analyzer.extract_metrics(text)
-                if metrics:
-                    financial_metrics.append(metrics)
+        for text in tqdm.tqdm(financial_texts, desc="Generating training data"):
+            # Extract metrics from text
+            metrics = self.analyzer.extract_metrics(text)
+            
+            if metrics:
+                # Generate question-answer pairs for each metric
+                for metric_name, value in metrics.items():
+                    # Format the metric name for natural language
+                    formatted_name = metric_name.replace('_', ' ').title()
+                    
+                    # Generate questions about this metric
+                    questions = [
+                        f"What is the {formatted_name}?",
+                        f"Can you tell me the {formatted_name}?",
+                        f"What was the company's {formatted_name}?",
+                        f"What did the {formatted_name} amount to?"
+                    ]
+                    
+                    # Format the answer
+                    if isinstance(value, (int, float)):
+                        answer = f"The {formatted_name} is ${value:,.2f}."
+                    else:
+                        answer = f"The {formatted_name} is {value}."
+                    
+                    # Add to training data
+                    for question in questions:
+                        training_data.append({
+                            "messages": [
+                                {"role": "system", "content": "You are a financial expert assistant that provides accurate information about financial data."},
+                                {"role": "user", "content": question},
+                                {"role": "assistant", "content": answer}
+                            ]
+                        })
+            
+            # Generate common financial questions
+            common_financial_metrics = [
+                "revenue", "profit margin", "EPS", "debt-to-equity ratio", 
+                "gross profit", "net income", "operating expenses"
+            ]
+            
+            for metric in common_financial_metrics:
+                if random.random() < 0.7:  # 70% chance to include each metric
+                    # Create a generic question about financial metrics
+                    question = f"What was the company's {metric}?"
+                    answer = f"Based on the financial documents, the company's {metric} information is not directly specified in this section."
+                    
+                    training_data.append({
+                        "messages": [
+                            {"role": "system", "content": "You are a financial expert assistant that provides accurate information about financial data."},
+                            {"role": "user", "content": question},
+                            {"role": "assistant", "content": answer}
+                        ]
+                    })
         
-        # Generate question-answer pairs about financial metrics
-        for i, (text, metrics) in enumerate(zip(financial_texts, financial_metrics)):
-            if not metrics:
-                continue
-                
-            # Generate revenue question
-            if "revenue" in metrics:
-                revenue_q = {
-                    "messages": [
-                        {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                        {"role": "user", "content": f"What was the revenue reported in this document?"},
-                        {"role": "assistant", "content": f"The revenue reported was ${metrics['revenue']:,.2f}. This figure represents the total income generated from the company's main business activities."}
-                    ]
-                }
-                training_data.append(revenue_q)
-            
-            # Generate profit margin question if we have both revenue and net_income
-            if "revenue" in metrics and "net_income" in metrics:
-                margin = metrics["net_income"] / metrics["revenue"]
-                margin_q = {
-                    "messages": [
-                        {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                        {"role": "user", "content": f"What is the profit margin shown in this document?"},
-                        {"role": "assistant", "content": f"The profit margin is {margin:.2%}. This represents the company's net income as a percentage of total revenue, indicating how much of each dollar of revenue is converted to profit."}
-                    ]
-                }
-                training_data.append(margin_q)
-            
-            # Generate EPS question
-            if "eps" in metrics:
-                eps_q = {
-                    "messages": [
-                        {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                        {"role": "user", "content": f"What was the reported earnings per share (EPS)?"},
-                        {"role": "assistant", "content": f"The reported earnings per share (EPS) was ${metrics['eps']:.2f}. This represents the portion of the company's profit allocated to each outstanding share of common stock."}
-                    ]
-                }
-                training_data.append(eps_q)
-                
-            # Generate debt-to-equity question
-            if "debt_to_equity" in metrics:
-                debt_q = {
-                    "messages": [
-                        {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                        {"role": "user", "content": f"What is the debt-to-equity ratio?"},
-                        {"role": "assistant", "content": f"The debt-to-equity ratio is {metrics['debt_to_equity']:.2f}. This indicates the relative proportion of shareholders' equity and debt used to finance the company's assets."}
-                    ]
-                }
-                training_data.append(debt_q)
-                
-            # Generate trend analysis if available
-            trends = self.analyzer.extract_financial_trends(text)
-            if trends and "growth" in trends and "direction" in trends:
-                trend_q = {
-                    "messages": [
-                        {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                        {"role": "user", "content": f"What is the trend in financial performance shown in this document?"},
-                        {"role": "assistant", "content": f"The financial performance shows a {trends['direction']} of {abs(trends['growth']):.2f}%. " + 
-                                                        (f"This is measured on a {trends['period']} basis." if 'period' in trends else "")}
-                    ]
-                }
-                training_data.append(trend_q)
-                
-            # Add general financial analysis question
-            metrics_str = ", ".join([f"{k.replace('_', ' ')}: ${v:,.2f}" if isinstance(v, (int, float)) and k != "eps" else f"{k.replace('_', ' ')}: {v}" 
-                                   for k, v in metrics.items() if not k.endswith("_pct")])
-            
-            general_q = {
-                "messages": [
-                    {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                    {"role": "user", "content": f"Can you analyze the key financial metrics in this report?"},
-                    {"role": "assistant", "content": f"Based on my analysis, the key financial metrics from this report are:\n\n{metrics_str}\n\nThese figures indicate " +
-                                                   ("a strong financial position " if "net_income" in metrics and metrics["net_income"] > 0 else "financial challenges ") +
-                                                   "for the company during this reporting period."}
-                ]
-            }
-            training_data.append(general_q)
-                
-        # Create additional training examples for common financial queries
-        common_financial_questions = [
+        # Add some generic financial analysis questions
+        generic_qa_pairs = [
             {
-                "messages": [
-                    {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                    {"role": "user", "content": "What does EPS stand for and why is it important?"},
-                    {"role": "assistant", "content": "EPS stands for Earnings Per Share. It represents a company's net profit divided by the number of outstanding shares. EPS is important because it indicates profitability on a per-share basis, allowing investors to compare companies of different sizes. Higher EPS generally indicates stronger financial performance, making it a key metric for investment decisions."}
-                ]
+                "question": "How did the company perform financially last quarter?",
+                "answer": "To analyze the company's financial performance last quarter, I would need to examine key metrics such as revenue growth, profit margins, EPS, and compare them to previous quarters and industry benchmarks. I can provide this analysis if you share the specific financial statements."
             },
             {
-                "messages": [
-                    {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                    {"role": "user", "content": "What's the difference between gross margin and net profit margin?"},
-                    {"role": "assistant", "content": "Gross margin is revenue minus cost of goods sold (COGS) divided by revenue, showing the percentage of revenue retained after direct production costs. Net profit margin is net income divided by revenue, showing the percentage of revenue converted to profit after all expenses. Gross margin focuses on production efficiency, while net profit margin reflects overall business profitability including all operating costs, taxes, and interest."}
-                ]
+                "question": "What does the balance sheet tell us about the company's financial health?",
+                "answer": "A company's balance sheet provides insights into its financial health by showing assets, liabilities, and shareholders' equity. Key indicators include the debt-to-equity ratio, current ratio, and working capital. These metrics help assess liquidity, solvency, and overall financial stability."
             },
             {
-                "messages": [
-                    {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                    {"role": "user", "content": "How do you interpret a company's P/E ratio?"},
-                    {"role": "assistant", "content": "The P/E (Price-to-Earnings) ratio is calculated by dividing a company's current share price by its earnings per share. A high P/E suggests investors expect higher future earnings growth, while a low P/E may indicate undervaluation or limited growth prospects. When interpreting a P/E ratio: (1) Compare it to industry averages, (2) Consider current market conditions, (3) Evaluate alongside other metrics like revenue growth and debt levels, and (4) Look at historical P/E trends for context."}
-                ]
-            },
-            {
-                "messages": [
-                    {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
-                    {"role": "user", "content": "What financial metrics should I look at to assess a company's debt burden?"},
-                    {"role": "assistant", "content": "To assess a company's debt burden, examine these key metrics: (1) Debt-to-Equity Ratio: Total debt divided by shareholders' equity, (2) Debt-to-EBITDA Ratio: Debt relative to earnings before interest, taxes, depreciation, and amortization, (3) Interest Coverage Ratio: How many times operating income can cover interest expenses, (4) Current Ratio: Short-term debt obligations versus current assets, and (5) Free Cash Flow: Cash available after capital expenditures to service debt. Lower D/E and D/EBITDA ratios and higher interest coverage generally indicate healthier debt levels."}
-                ]
+                "question": "How do I calculate the P/E ratio?",
+                "answer": "The Price-to-Earnings (P/E) ratio is calculated by dividing the current market price per share by the earnings per share (EPS). For example, if a company's stock is trading at $50 and its EPS is $5, the P/E ratio would be 10. This ratio helps investors assess whether a stock is overvalued or undervalued relative to its earnings."
             }
         ]
         
-        training_data.extend(common_financial_questions)
+        for qa in generic_qa_pairs:
+            training_data.append({
+                "messages": [
+                    {"role": "system", "content": "You are a financial expert assistant that provides accurate information about financial data."},
+                    {"role": "user", "content": qa["question"]},
+                    {"role": "assistant", "content": qa["answer"]}
+                ]
+            })
         
-        # Write training data to JSONL file
-        training_file_path = os.path.join(self.output_dir, "financial_training_data.jsonl")
-        with open(training_file_path, "w") as f:
-            for entry in training_data:
-                f.write(json.dumps(entry) + "\n")
-                
-        self.logger.info(f"Generated {len(training_data)} training examples in {training_file_path}")
-        return training_file_path
+        # Write to JSONL file
+        with jsonlines.open(output_file, 'w') as writer:
+            for item in training_data:
+                writer.write(item)
+        
+        self.logger.info(f"Generated {len(training_data)} training examples")
+        return output_file
     
-    def start_fine_tuning(self, training_file_path: str) -> Dict[str, Any]:
+    def start_fine_tuning(self, training_file: str) -> Any:
         """
         Start the fine-tuning process using the OpenAI API.
         
         Args:
-            training_file_path: Path to the JSONL training file
+            training_file: Path to the JSONL training file
             
         Returns:
             Response from the fine-tuning creation API
         """
         try:
             # Upload the training file
-            with open(training_file_path, "rb") as f:
-                response = self.client.files.create(
+            with open(training_file, "rb") as f:
+                response = openai.File.create(
                     file=f,
                     purpose="fine-tune"
                 )
@@ -224,7 +191,7 @@ class ModelFineTuner:
             time.sleep(5)
             
             # Create fine-tuning job
-            response = self.client.fine_tuning.jobs.create(
+            response = openai.FineTuningJob.create(
                 training_file=file_id,
                 model=self.base_model,
                 hyperparameters={
@@ -240,10 +207,12 @@ class ModelFineTuner:
             with open(job_details_path, "w") as f:
                 json.dump({
                     "job_id": job_id,
-                    "base_model": self.base_model,
-                    "file_id": file_id,
-                    "created_at": time.time()
-                }, f)
+                    "status": response.status,
+                    "model": self.base_model,
+                    "fine_tuned_model": response.get("fine_tuned_model", None),
+                    "training_file": file_id,
+                    "created_at": response.created_at
+                }, f, indent=2)
                 
             return response
             
@@ -251,7 +220,7 @@ class ModelFineTuner:
             self.logger.error(f"Error starting fine-tuning job: {str(e)}")
             raise ValueError(f"Fine-tuning failed: {str(e)}")
     
-    def check_fine_tuning_status(self, job_id: str = None) -> Dict[str, Any]:
+    def check_fine_tuning_status(self, job_id: str = None) -> Any:
         """
         Check the status of a fine-tuning job.
         
@@ -274,7 +243,7 @@ class ModelFineTuner:
                 raise ValueError("No job ID found in job details")
         
         try:
-            response = self.client.fine_tuning.jobs.retrieve(job_id)
+            response = openai.FineTuningJob.retrieve(job_id)
             
             # Log status details
             status = response.status
@@ -286,6 +255,21 @@ class ModelFineTuner:
                     f.write(response.fine_tuned_model)
                 self.logger.info(f"Fine-tuned model ID: {response.fine_tuned_model}")
                 
+            # Update job details
+            job_details_path = os.path.join(self.output_dir, "job_details.json")
+            if os.path.exists(job_details_path):
+                with open(job_details_path, 'r') as f:
+                    job_details = json.load(f)
+                
+                job_details.update({
+                    "status": response.status,
+                    "fine_tuned_model": response.get("fine_tuned_model", None),
+                    "finished_at": response.get("finished_at", None)
+                })
+                
+                with open(job_details_path, 'w') as f:
+                    json.dump(job_details, f, indent=2)
+            
             return response
             
         except Exception as e:
@@ -319,16 +303,16 @@ class ModelFineTuner:
             List of financial questions
         """
         questions = [
-            "What are the key components of a company's balance sheet?",
-            "How do you calculate Return on Equity (ROE)?",
-            "What's the difference between operating income and net income?",
-            "How should I interpret a negative free cash flow?",
-            "What financial metrics best indicate a company's liquidity?",
-            "How does depreciation affect a company's financial statements?",
-            "What is EBITDA and why is it important?",
-            "How do stock buybacks affect EPS?",
-            "What's a good debt-to-equity ratio for a technology company?",
-            "How do changes in interest rates affect corporate bonds?"
+            "What was the company's revenue in the last quarter?",
+            "How did the profit margin change year-over-year?",
+            "What is the current EPS?",
+            "What factors affected the company's operating expenses?",
+            "How does the company's debt-to-equity ratio compare to industry standards?",
+            "What are the key financial metrics to focus on in this report?",
+            "Can you summarize the company's financial performance?",
+            "What is the gross profit margin?",
+            "How much did R&D expenses increase compared to last year?",
+            "What are the most significant risks mentioned in the financial report?"
         ]
         
         return questions[:min(n, len(questions))]
@@ -355,10 +339,10 @@ class ModelFineTuner:
         
         for question in questions:
             try:
-                response = self.client.chat.completions.create(
+                response = openai.ChatCompletion.create(
                     model=model_id,
                     messages=[
-                        {"role": "system", "content": "You are a financial analyst assistant. Provide accurate, concise answers about financial metrics with proper formatting and units."},
+                        {"role": "system", "content": "You are a financial expert assistant that provides accurate information about financial data."},
                         {"role": "user", "content": question}
                     ],
                     temperature=0.1,

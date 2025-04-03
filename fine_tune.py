@@ -8,6 +8,10 @@ import sys
 import argparse
 import logging
 import time
+
+# Add the current directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from src.model_fine_tuner import ModelFineTuner
 from src.doc_processor import DocProcessor
 
@@ -68,29 +72,36 @@ def main():
     try:
         if args.command == "create-data":
             logger.info(f"Creating training data from {len(args.docs)} documents")
-            docs_processor = DocProcessor()
-            fine_tuner = ModelFineTuner(output_dir=args.output_dir)
-            
-            all_texts = []
-            for doc_path in args.docs:
-                if not os.path.exists(doc_path):
-                    logger.error(f"Document not found: {doc_path}")
-                    continue
-                    
-                try:
-                    chunks = docs_processor.load_and_chunk(doc_path)
-                    texts = [chunk.page_content for chunk in chunks]
-                    all_texts.extend(texts)
-                    logger.info(f"Processed {len(chunks)} chunks from {doc_path}")
-                except Exception as e:
-                    logger.error(f"Error processing {doc_path}: {str(e)}")
-            
-            if not all_texts:
-                logger.error("No text extracted from documents")
-                return 1
+            try:
+                docs_processor = DocProcessor()
+                fine_tuner = ModelFineTuner(output_dir=args.output_dir)
                 
-            training_file = fine_tuner.generate_training_data(all_texts)
-            logger.info(f"Training data created and saved to {training_file}")
+                all_texts = []
+                for doc_path in args.docs:
+                    if not os.path.exists(doc_path):
+                        logger.error(f"Document not found: {doc_path}")
+                        continue
+                        
+                    try:
+                        logger.info(f"Processing document: {doc_path}")
+                        chunks = docs_processor.load_and_chunk(doc_path)
+                        texts = [chunk.page_content for chunk in chunks]
+                        all_texts.extend(texts)
+                        logger.info(f"Processed {len(chunks)} chunks from {doc_path}")
+                    except Exception as e:
+                        logger.error(f"Error processing {doc_path}: {str(e)}")
+                        logger.exception("Full exception details:")
+                
+                if not all_texts:
+                    logger.error("No text extracted from documents")
+                    return 1
+                    
+                training_file = fine_tuner.generate_training_data(all_texts)
+                logger.info(f"Training data created and saved to {training_file}")
+            except Exception as e:
+                logger.error(f"Error in create-data command: {str(e)}")
+                logger.exception("Full exception details:")
+                return 1
             
         elif args.command == "start":
             logger.info(f"Starting fine-tuning job with {args.model}")

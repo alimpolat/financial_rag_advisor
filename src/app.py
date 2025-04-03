@@ -1,12 +1,12 @@
 import streamlit as st
-from doc_processor import DocProcessor
-from rag_engine import RAGEngine
+from src.doc_processor import DocProcessor
+from src.rag_engine import RAGEngine
 import os
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 from io import BytesIO
-from financial_analyzer import FinancialAnalyzer
+from src.financial_analyzer import FinancialAnalyzer
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
