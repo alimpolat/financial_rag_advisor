@@ -37,7 +37,7 @@ class RAGEngine:
             if embeddings is None:
                 # Use specialized financial embeddings if not provided
                 embedding_engine = EmbeddingEngine()
-                embeddings = embedding_engine.get_embeddings()
+                embeddings = embedding_engine.embeddings
             
             # Create vector store with financial documents
             self.vector_store = Chroma.from_documents(docs, embeddings)
@@ -100,10 +100,23 @@ class RAGEngine:
             context_texts = []
             sources = []
             
+            # Track content hashes for deduplication
+            content_hashes = set()
+            
             for doc, score in retrieved_docs:
-                if score < 0.65:  # Only use relevant results for financial accuracy
+                if score < 0.3:  # Reduced threshold to allow more results
+                    continue
+                
+                # Create a simplified version of content for deduplication
+                # Remove whitespace and convert to lowercase for comparison
+                simplified_content = re.sub(r'\s+', '', doc.page_content.lower())
+                content_hash = hash(simplified_content)
+                
+                # Skip if we've already seen very similar content
+                if content_hash in content_hashes:
                     continue
                     
+                content_hashes.add(content_hash)
                 context_texts.append(doc.page_content)
                 sources.append({
                     "content": doc.page_content,

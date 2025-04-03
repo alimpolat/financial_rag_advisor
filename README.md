@@ -249,46 +249,56 @@ The Financial RAG Advisor includes capabilities for fine-tuning LLMs to further 
 
 ### Fine-Tuning Features
 
-- **Domain-Specific Training**: Generate synthetic training data from financial documents
-- **Specialized Financial QA**: Improve model responses for financial terminology and metrics
-- **Performance Optimization**: Enhance accuracy for financial calculations and analyses
+- **Domain-Specific Model**: Fine-tuned OpenAI model (ft:gpt-3.5-turbo-0125:handelsbanken::BIB4bXrP) specialized for financial analysis and terminology
+- **Training Data Generation**: Automatic extraction of financial question-answer pairs from documents
+- **Specialized Financial Knowledge**: Enhanced understanding of financial metrics, ratios, and terminology
+- **Performance Improvements**: More accurate and contextually relevant answers to financial queries
 
-### Using Fine-Tuning
+### Fine-Tuning Implementation
 
-The system includes a command-line tool for managing fine-tuning operations:
+The system uses a dedicated `ModelFineTuner` class to:
 
-1. **Create Training Data**:
-   ```bash
-   ./fine_tune.py create-data --docs data/financial_report1.pdf data/financial_report2.pdf
-   ```
+1. **Generate Training Data**: Creates 300+ question-answer pairs from Tesla's Q4 2024 earnings report
+2. **Start Fine-Tuning**: Submits the training data to OpenAI's fine-tuning API
+3. **Monitor Progress**: Tracks the status of fine-tuning jobs
+4. **Test Results**: Evaluates the fine-tuned model with sample financial questions
 
-2. **Start Fine-Tuning Job**:
-   ```bash
-   ./fine_tune.py start --training-file ./fine_tuning/financial_training_data.jsonl
-   ```
+### Using the Fine-Tuned Model
 
-3. **Check Fine-Tuning Status**:
-   ```bash
-   ./fine_tune.py status
-   ```
+The fine-tuned model is seamlessly integrated into the RAG pipeline:
 
-4. **Test Fine-Tuned Model**:
-   ```bash
-   ./fine_tune.py test
-   ```
+```python
+# Default initialization with fine-tuned model
+model = "ft:gpt-3.5-turbo-0125:handelsbanken::BIB4bXrP"
+rag_engine = RAGEngine(docs, model=model)
+```
 
-The fine-tuned model enhances the system's ability to understand financial context, extract relevant metrics, and provide more accurate answers to financial queries.
+### Fine-Tuning CLI Tool
 
-### Implementation Example: Tesla Q4 2024 Earnings Report
+The included `fine_tune.py` script provides a command-line interface for managing fine-tuning operations:
 
-The fine-tuning capabilities have been demonstrated using Tesla's Q4 2024 Earnings Report. The process includes:
+```bash
+# Generate training data from financial documents
+python fine_tune.py generate
 
-1. **Document Processing**: The Tesla report is processed to extract financial information and context
-2. **Training Data Generation**: Creating 377 specialized financial question-answer pairs
-3. **Fine-Tuning Execution**: Training a custom model on financial domain knowledge
-4. **Performance Improvement**: Enhanced ability to answer Tesla-specific financial queries
+# Start a fine-tuning job
+python fine_tune.py train
 
-This implementation showcases how domain-specific fine-tuning can dramatically improve the RAG system's performance on company-specific financial analysis tasks.
+# Check the status of a fine-tuning job
+python fine_tune.py status --job_id <job_id>
+
+# Test the fine-tuned model with financial questions
+python fine_tune.py test --questions "What is gross margin?" "What are Tesla's key products?"
+```
+
+### Benefits of Fine-Tuning
+
+1. **Enhanced Financial Context**: The model better understands financial terminology and concepts
+2. **Company-Specific Knowledge**: Improved understanding of Tesla's business operations and metrics
+3. **Format Consistency**: Standardized presentation of financial values with appropriate units
+4. **Expert Tone**: Responses mimic the language style of financial analysts
+
+This fine-tuned model significantly enhances the accuracy and relevance of responses in financial contexts, making the RAG system more effective for financial document analysis.
 
 ## License
 
