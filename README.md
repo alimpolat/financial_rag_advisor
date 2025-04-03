@@ -279,6 +279,17 @@ The system includes a command-line tool for managing fine-tuning operations:
 
 The fine-tuned model enhances the system's ability to understand financial context, extract relevant metrics, and provide more accurate answers to financial queries.
 
+### Implementation Example: Tesla Q4 2024 Earnings Report
+
+The fine-tuning capabilities have been demonstrated using Tesla's Q4 2024 Earnings Report. The process includes:
+
+1. **Document Processing**: The Tesla report is processed to extract financial information and context
+2. **Training Data Generation**: Creating 377 specialized financial question-answer pairs
+3. **Fine-Tuning Execution**: Training a custom model on financial domain knowledge
+4. **Performance Improvement**: Enhanced ability to answer Tesla-specific financial queries
+
+This implementation showcases how domain-specific fine-tuning can dramatically improve the RAG system's performance on company-specific financial analysis tasks.
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details. 
