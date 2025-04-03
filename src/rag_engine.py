@@ -7,7 +7,12 @@ from typing import List, Dict, Any
 import logging
 import os
 import re
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
 class RAGEngine:
     """
@@ -15,53 +20,59 @@ class RAGEngine:
     Optimized for financial terminology and metrics analysis.
     """
     
-    def __init__(self, docs: List, persist_dir: str = "./chroma_db"):
+    def __init__(self, docs: List, 
+                model: str = "ft:gpt-3.5-turbo-0125:handelsbanken::BIB4bXrP",  # Use the fine-tuned model by default
+                embeddings = None):
         """
         Initializes the RAG pipeline with document chunks optimized for financial queries.
         
         Args:
             docs: List of document chunks
-            persist_dir: Directory to persist the vector store
+            model: Model to use for generation (defaults to the fine-tuned model)
+            embeddings: Embedding function to use (if None, will use default)
         """
         self.logger = logging.getLogger(__name__)
-        self.embedding_engine = EmbeddingEngine()
         
         try:
-            self.vectorstore = Chroma.from_documents(
-                docs, 
-                self.embedding_engine.embeddings, 
-                persist_directory=persist_dir
+            if embeddings is None:
+                # Use specialized financial embeddings if not provided
+                embedding_engine = EmbeddingEngine()
+                embeddings = embedding_engine.get_embeddings()
+            
+            # Create vector store with financial documents
+            self.vector_store = Chroma.from_documents(docs, embeddings)
+            
+            # Initialize language model with financial expertise
+            self.llm = ChatOpenAI(
+                temperature=0,
+                model=model,  # Using the fine-tuned model
+                api_key=os.getenv("OPENAI_API_KEY")
             )
             
-            # Use MMR retrieval for balancing relevance and diversity in financial data
-            self.retriever = self.vectorstore.as_retriever(
-                search_type="mmr", 
-                search_kwargs={"k": 4, "fetch_k": 10}
-            )
+            # Setup financial RAG pipeline
+            template = """
+            You are a financial expert analyzing documents.
+            Answer the question based only on the following financial context.
+            Format financial values consistently with dollar signs and decimal points where appropriate.
+            If the answer is not in the context, say that you don't have that information.
+            Highlight key financial metrics and trends when relevant.
             
-            self.llm = ChatOpenAI(model="gpt-4", temperature=0.1)
-            
-            # Create a financial-specific prompt template
-            template = """You are a financial analyst assistant. Use the following context from financial documents to answer the question accurately. When mentioning financial figures, always specify the currency, time period, and other relevant qualifiers.
-            
-Context: {context}
-
-Question: {question}
-
-Answer with factual information only. If the answer isn't in the context, say "The information is not available in the provided documents." Include relevant financial metrics when applicable."""
+            Context: {context}
+            Question: {query}
+            """
             
             self.prompt = PromptTemplate.from_template(template)
             
-            self.qa_chain = RetrievalQA.from_chain_type(
-                llm=self.llm,
-                chain_type="stuff",
-                retriever=self.retriever,
-                return_source_documents=True,
-                chain_type_kwargs={"prompt": self.prompt}
+            # Financial RAG chain
+            self.qa_chain = (
+                {"context": self.vector_store.as_retriever(), "query": RunnablePassthrough()}
+                | self.prompt
+                | self.llm
+                | StrOutputParser()
             )
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize RAG pipeline: {str(e)}")
+            self.logger.error(f"Failed to initialize RAG: {str(e)}")
             raise ValueError(f"Failed to initialize RAG pipeline: {str(e)}")
     
     def query(self, question: str) -> Dict[str, Any]:
@@ -79,19 +90,54 @@ Answer with factual information only. If the answer isn't in the context, say "T
             expanded_query = self.expand_financial_query(question)
             self.logger.info(f"Expanded query: {expanded_query}")
             
-            result = self.qa_chain({"query": expanded_query})
+            # Use MMR retrieval for financial documents to balance relevance with diversity
+            retrieved_docs = self.vector_store.similarity_search_with_relevance_scores(
+                expanded_query, 
+                k=4
+            )
             
+            # Format the context with financial document metadata
+            context_texts = []
             sources = []
-            for doc in result["source_documents"]:
+            
+            for doc, score in retrieved_docs:
+                if score < 0.65:  # Only use relevant results for financial accuracy
+                    continue
+                    
+                context_texts.append(doc.page_content)
                 sources.append({
-                    "content": doc.page_content[:200] + "...",
+                    "content": doc.page_content,
                     "page": doc.metadata.get("page", "Unknown"),
-                    "source": doc.metadata.get("source", "Unknown"),
                     "company": doc.metadata.get("company", "Unknown"),
-                    "date": doc.metadata.get("date", "Unknown")
+                    "date": doc.metadata.get("date", "Unknown"),
+                    "report_type": doc.metadata.get("report_type", "Unknown")
                 })
-                
-            return {"answer": result["result"], "sources": sources}
+            
+            if not context_texts:
+                return {"answer": "I couldn't find relevant information to answer your question about Tesla's finances.", "sources": []}
+            
+            # Format prompt with financial context
+            prompt = f"""
+            You are a financial expert assistant analyzing documents. 
+            Answer the question based on the following financial context. 
+            Format financial values consistently with dollar signs and decimal points where appropriate.
+            If the answer is not in the context, say that you don't have that information.
+            Highlight key financial metrics and trends when relevant.
+            
+            Context:
+            {' '.join(context_texts)}
+            
+            Question: {question}
+            """
+            
+            # Generate answer using the fine-tuned model
+            response = self.llm.generate([prompt])
+            answer = response.generations[0][0].text.strip()
+            
+            return {
+                "answer": answer,
+                "sources": sources
+            }
             
         except Exception as e:
             self.logger.error(f"Query failed: {str(e)}")
@@ -99,34 +145,33 @@ Answer with factual information only. If the answer isn't in the context, say "T
     
     def expand_financial_query(self, query: str) -> str:
         """
-        Expands financial queries with domain-specific terms to improve retrieval.
+        Expands financial queries with domain-specific terminology.
         
         Args:
             query: Original financial query
             
         Returns:
-            Expanded query with financial synonyms
+            Expanded query with additional financial terms
         """
-        # Dictionary of financial terms and their synonyms
-        financial_synonyms = {
-            r'\bprofit\b': ['profit', 'net income', 'earnings', 'bottom line'],
-            r'\brevenue\b': ['revenue', 'sales', 'top line', 'turnover'],
-            r'\bmargin\b': ['margin', 'profit margin', 'gross margin', 'operating margin'],
-            r'\bgrowth\b': ['growth', 'increase', 'expansion', 'rise'],
-            r'\bdebt\b': ['debt', 'liabilities', 'obligations', 'loans'],
-            r'\bassets\b': ['assets', 'holdings', 'resources', 'property'],
-            r'\bEPS\b': ['EPS', 'earnings per share', 'profit per share'],
-            r'\bP/E\b': ['P/E', 'price to earnings', 'price-earnings ratio'],
+        # Financial term expansion dictionary
+        financial_expansions = {
+            "revenue": ["income", "sales", "top line"],
+            "profit": ["earnings", "net income", "bottom line", "margin"],
+            "eps": ["earnings per share", "income per share"],
+            "margin": ["profit margin", "gross margin", "operating margin"],
+            "debt": ["liabilities", "leverage", "borrowings"],
+            "assets": ["resources", "holdings", "property"],
+            "guidance": ["forecast", "outlook", "projection", "estimate"],
+            "dividend": ["payout", "distribution"],
+            "cost": ["expense", "expenditure"],
+            "growth": ["increase", "expansion", "rise", "improvement"]
         }
         
-        expanded_query = query
+        expanded_terms = query
+        for term, expansions in financial_expansions.items():
+            if term.lower() in query.lower():
+                for expansion in expansions:
+                    if expansion.lower() not in query.lower():
+                        expanded_terms += f" OR {expansion}"
         
-        # Check if query contains any of our financial terms
-        for term_pattern, synonyms in financial_synonyms.items():
-            if re.search(term_pattern, query, re.IGNORECASE):
-                # Add synonyms to the query
-                synonym_string = " OR ".join([f'"{syn}"' for syn in synonyms if syn.lower() not in query.lower()])
-                if synonym_string:
-                    expanded_query += f" ({synonym_string})"
-        
-        return expanded_query 
+        return expanded_terms 
