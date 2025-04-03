@@ -225,7 +225,9 @@ financial-rag-advisor/
 │   ├── embedding_engine.py  # Embeddings optimized for financial text
 │   ├── rag_engine.py        # RAG pipeline with financial-aware retrieval
 │   ├── financial_analyzer.py # Financial metrics extraction and analysis
+│   ├── model_fine_tuner.py  # Fine-tuning OpenAI models with financial data
 │   └── app.py               # Streamlit UI with financial visualization
+├── fine_tune.py             # CLI tool for model fine-tuning operations
 ├── tests/
 │   └── test_rag.py          # Test suite for components
 └── uploads/                 # Directory for user uploaded files
@@ -240,6 +242,42 @@ Potential improvements to consider:
 - **Historical Trending**: Visualization of financial metrics over time
 - **Sentiment Analysis**: Detecting sentiment in financial narratives and forward-looking statements
 - **Regulatory Compliance**: Identifying disclosures and compliance-related statements
+
+## Model Fine-Tuning
+
+The Financial RAG Advisor includes capabilities for fine-tuning LLMs to further improve performance on financial text:
+
+### Fine-Tuning Features
+
+- **Domain-Specific Training**: Generate synthetic training data from financial documents
+- **Specialized Financial QA**: Improve model responses for financial terminology and metrics
+- **Performance Optimization**: Enhance accuracy for financial calculations and analyses
+
+### Using Fine-Tuning
+
+The system includes a command-line tool for managing fine-tuning operations:
+
+1. **Create Training Data**:
+   ```bash
+   ./fine_tune.py create-data --docs data/financial_report1.pdf data/financial_report2.pdf
+   ```
+
+2. **Start Fine-Tuning Job**:
+   ```bash
+   ./fine_tune.py start --training-file ./fine_tuning/financial_training_data.jsonl
+   ```
+
+3. **Check Fine-Tuning Status**:
+   ```bash
+   ./fine_tune.py status
+   ```
+
+4. **Test Fine-Tuned Model**:
+   ```bash
+   ./fine_tune.py test
+   ```
+
+The fine-tuned model enhances the system's ability to understand financial context, extract relevant metrics, and provide more accurate answers to financial queries.
 
 ## License
 
