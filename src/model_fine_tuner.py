@@ -8,11 +8,19 @@ import os
 import json
 import time
 import logging
+import re
+import random
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 import pandas as pd
+import jsonlines
+import tqdm
 from openai import OpenAI
-from financial_analyzer import FinancialAnalyzer
+from dotenv import load_dotenv
+from src.financial_analyzer import FinancialAnalyzer
 
+# Load environment variables from .env file
+load_dotenv()
 
 class ModelFineTuner:
     """
@@ -33,7 +41,6 @@ class ModelFineTuner:
             n_epochs: Number of epochs for fine-tuning
         """
         self.logger = logging.getLogger(__name__)
-        self.client = OpenAI()
         self.base_model = base_model
         self.output_dir = output_dir
         self.n_epochs = n_epochs
@@ -41,6 +48,12 @@ class ModelFineTuner:
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize OpenAI client
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+        self.client = OpenAI(api_key=api_key)
         
     def generate_training_data(self, 
                               financial_texts: List[str], 
